@@ -79,3 +79,54 @@ test('html escapes interpolations unless raw', () => {
   assert.equal(html`<p>${'<b>'}</p>`.toString(), '<p>&lt;b&gt;</p>');
   assert.equal(html`<p>${raw('<b>')}</p>`.toString(), '<p><b></p>');
 });
+
+test('request body uses gpt-oss with low reasoning effort by default', async () => {
+  const { buildRequestBody, DEFAULT_MODEL } = await import('../lib/llm.js');
+  const { profile } = cleanProfile(validInput, positions);
+  const body = buildRequestBody(getTopic('safety'), profile);
+  assert.equal(body.model, DEFAULT_MODEL);
+  assert.equal(body.reasoning_effort, 'low');
+  assert.equal(buildRequestBody(getTopic('safety'), profile, 'some/other-model').reasoning_effort, undefined);
+});
+
+test('a Groq 404 is not retried and gives a plain message', async () => {
+  const { generateTopic } = await import('../lib/llm.js');
+  const { profile } = cleanProfile(validInput, positions);
+  let calls = 0;
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  globalThis.fetch = async () => { calls++; return new Response('{"error":"model_not_found"}', { status: 404 }); };
+  try {
+    await assert.rejects(generateTopic(getTopic('safety'), profile, { GROQ_API_KEY: 'x' }), (e) => e.status === 503 && !e.message.includes('model'));
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+  }
+});
+
+test('falls back without JSON mode and parses fenced JSON', async () => {
+  const { generateTopic, parseJson } = await import('../lib/llm.js');
+  assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
+  const { profile } = cleanProfile(validInput, positions);
+  const bodies = [];
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  globalThis.fetch = async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    bodies.push(body);
+    if (body.response_format) return new Response('{"error":{"message":"response_format is not supported"}}', { status: 400 });
+    const content = 'Here you go:\n{"questions":[{"question":"Q?","answer":"A."}]}';
+    return Response.json({ choices: [{ message: { content } }] });
+  };
+  try {
+    const qs = await generateTopic(getTopic('contract'), profile, { GROQ_API_KEY: 'x' });
+    assert.equal(qs[0].question, 'Q?');
+    assert.equal(bodies.length, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realError;
+  }
+});
