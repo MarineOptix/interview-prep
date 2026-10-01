@@ -57,7 +57,19 @@ Limits: `PLANS_PER_HOUR` per IP (in memory, resets on restart).
 
 ## Deploy
 
-Any host that runs Node 22: Railway, Render, Fly.io, a VPS. Start command `npm start`, health check `GET /health`, set `GROQ_API_KEY` (and optionally `GROQ_MODEL`, `PLANS_PER_HOUR`). A plan takes 7 requests of up to ~30 s each, so the host must allow requests of at least 90 s.
+### Render (current)
+
+`render.yaml` describes the service (free plan, Frankfurt, auto-deploy on every push to `main`).
+
+1. Render dashboard → **New → Blueprint** → connect GitHub and choose `MarineOptix/interview-prep`.
+2. Render asks for `GROQ_API_KEY` (marked `sync: false`, so it is never in git). Paste the key.
+3. **Deploy Blueprint**. The site appears at `https://interview-prep-<suffix>.onrender.com`.
+
+Free plan behaviour: the service sleeps after 15 minutes without visitors and the next visit waits about a minute while it wakes up. A generation in progress keeps it awake.
+
+### Other hosts
+
+Any host that runs Node 22: start command `npm start`, health check `GET /health`, set `GROQ_API_KEY` (and optionally `GROQ_MODEL`, `PLANS_PER_HOUR`). A plan takes 7 requests of up to ~30 s each, so the host must allow requests of at least 90 s.
 
 ## Layout
 

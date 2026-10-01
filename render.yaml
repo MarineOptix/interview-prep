@@ -1,0 +1,21 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# In the Render dashboard: New → Blueprint → pick this repository.
+services:
+  - type: web
+    name: interview-prep
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: GROQ_API_KEY
+        sync: false # entered by hand in the dashboard, never stored in git
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: PLANS_PER_HOUR
+        value: "5"
