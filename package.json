@@ -5,7 +5,7 @@
   "description": "Personalised interview preparation plans for seafarers",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",

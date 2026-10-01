@@ -57,24 +57,27 @@ Limits: `PLANS_PER_HOUR` per IP (in memory, resets on restart).
 
 ## Deploy
 
-### Render (current)
+### Vercel (current)
 
-`render.yaml` describes the service (free plan, Frankfurt, auto-deploy on every push to `main`).
+`vercel.json` serves `public/` as static files and rewrites every other path to one Node function, `api/index.js`, which runs the same handler as the local server (`lib/app.js`). No build step.
 
-1. Render dashboard → **New → Blueprint** → connect GitHub and choose `MarineOptix/interview-prep`.
-2. Render asks for `GROQ_API_KEY` (marked `sync: false`, so it is never in git). Paste the key.
-3. **Deploy Blueprint**. The site appears at `https://interview-prep-<suffix>.onrender.com`.
+1. vercel.com → **Add New → Project** → import `MarineOptix/interview-prep`.
+2. Framework preset: **Other**. Leave build and output settings as they are (they come from `vercel.json`).
+3. Environment variables: `GROQ_API_KEY` (required), optionally `GROQ_MODEL`, `PLANS_PER_HOUR`.
+4. **Deploy**. Every push to `main` deploys again.
 
-Free plan behaviour: the service sleeps after 15 minutes without visitors and the next visit waits about a minute while it wakes up. A generation in progress keeps it awake.
+Limits to know: each function call may run up to 60 s (`maxDuration`), enough for one topic. The per-IP limit lives in memory of a function instance, so on Vercel it is approximate.
 
-### Other hosts
+### Render or any Node host
 
-Any host that runs Node 22: start command `npm start`, health check `GET /health`, set `GROQ_API_KEY` (and optionally `GROQ_MODEL`, `PLANS_PER_HOUR`). A plan takes 7 requests of up to ~30 s each, so the host must allow requests of at least 90 s.
+`render.yaml` is a ready Render Blueprint (Render may ask for a payment card even on the free plan). Any other host: Node 22, start command `npm start`, health check `GET /health`, same environment variables, requests of at least 90 s allowed.
 
 ## Layout
 
 ```
-server.js                 routes and API
+server.js                 local / standalone server
+api/index.js              Vercel function entry
+lib/app.js                routes and API (shared)
 lib/positions.js          loads content/positions
 lib/pages.js              HTML for all pages
 lib/form.js               form options and server-side validation
