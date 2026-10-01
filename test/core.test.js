@@ -130,3 +130,22 @@ test('falls back without JSON mode and parses fenced JSON', async () => {
     console.error = realError;
   }
 });
+
+test('question bank: every rank has rank-specific questions for the core topics', async () => {
+  const { bankFor, parseBank } = await import('../lib/question-bank.js');
+  assert.deepEqual(parseBank('# Title\nintro\n## safety\n- A?\n- B?\n'), { safety: ['A?', 'B?'] });
+  for (const p of positions) {
+    for (const topic of ['experience', 'conventions', 'safety', 'technical']) {
+      const own = bankFor(p.slug, topic).length - bankFor('no-such-rank', topic).length;
+      assert.ok(own >= 3, `${p.slug} / ${topic} has only ${own} own questions`);
+    }
+    for (const t of TOPICS) assert.ok(bankFor(p.slug, t.id).length >= t.count, `${p.slug} / ${t.id}`);
+  }
+});
+
+test('prompt includes the question bank for the rank and topic', () => {
+  const { profile } = cleanProfile(validInput, positions);
+  const [system, user] = buildMessages(getTopic('safety'), profile);
+  assert.match(system.content, /QUESTION BANK/);
+  assert.match(user.content, /QUESTION BANK[\s\S]*crankcase explosion/);
+});

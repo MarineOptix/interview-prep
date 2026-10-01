@@ -41,6 +41,10 @@ Next answer.
 
 A rank without questions shows “soon” on the landing page and still links to the plan builder. Content is read at start-up, so restart the server after editing (`npm run dev` restarts on save of `.js` files only).
 
+### Question bank — `content/question-bank/*.md`
+
+Typical interview questions the plan is built from. `_common.md` holds questions for every rank; `<slug>.md` adds rank-specific ones. Format: a `## <topic-id>` heading (`motivation`, `experience`, `conventions`, `safety`, `technical`, `leadership`, `contract`), then one question per `- ` line. For each topic the model picks the questions that fit the vacancy best and adapts the wording. To add a question, add a line; no code changes needed.
+
 ### Knowledge base — `content/knowledge-base/*.md`
 
 General maritime reference that grounds the AI answers. Each plan topic reads specific files (see `lib/topics.js`); `technical` resolves to `technical-deck.md`, `technical-engine.md` or `technical-catering.md` by the rank’s department. Facts about the candidate come only from the form.
@@ -85,6 +89,7 @@ lib/topics.js             plan topics, question counts, knowledge files
 lib/prompt.js             LLM prompt
 lib/llm.js                Groq call, retries, output checks, mock mode
 lib/knowledge.js          knowledge-base loader
+lib/question-bank.js      question-bank loader
 public/                   styles.css, plan.js, favicon
 content/                  positions and knowledge base
 test/                     unit tests (node --test)
