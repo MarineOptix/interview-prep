@@ -268,3 +268,40 @@ mark.gap { background: var(--gap-bg); color: inherit; padding: 0 0.15em; border-
 .sub-field { margin-top: 0.75rem; }
 .sub-field[hidden] { display: none; }
 .sub-field label { display: block; font-weight: 500; font-size: var(--step--1); margin-bottom: 0.35rem; }
+
+/* ---------- filling the form from a document ---------- */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.privacy-note { margin-top: 1.5rem; padding: 1rem 1.25rem; background: var(--surface); border-left: 4px solid var(--signal-blue); font-size: var(--step--1); max-width: var(--measure); }
+.privacy-note p { margin: 0; }
+.privacy-note p + p { margin-top: 0.5rem; }
+
+.import { margin-top: 1.25rem; padding: 1rem 1.25rem 1.1rem; border: 1px dashed var(--line); border-radius: 4px; background: var(--surface); }
+.import-title { margin: 0; font-weight: 700; font-stretch: 85%; font-size: var(--step-1); }
+.import .hint { margin-top: 0.2rem; }
+.import-actions { margin-top: 0.9rem; }
+.import .button { padding: 0.6rem 1.1rem; }
+.file-button { cursor: pointer; }
+.file-button:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.import-link { display: flex; gap: 0.6rem; margin-top: 0.75rem; }
+.import-link input { flex: 1; min-width: 0; }
+.import-link .button { flex: none; }
+.import-paste { margin-top: 0.75rem; }
+.import-paste summary { cursor: pointer; color: var(--signal-blue); text-decoration: underline; text-underline-offset: 0.18em; width: fit-content; }
+@media (prefers-color-scheme: dark) { .import-paste summary { color: #9db6f2; } }
+.import-paste textarea { margin-top: 0.6rem; }
+.import-paste .button { margin-top: 0.6rem; }
+.import-status { margin: 0.75rem 0 0; font-size: var(--step--1); font-weight: 600; min-height: 1.3em; }
+.import-status:empty { display: none; }
+.import-status.is-error { color: var(--signal-red); }
+
+/* Values filled in from a document: the same yellow as gaps in the plan, until the person edits them. */
+input.filled, select.filled, textarea.filled { background: var(--gap-bg); border-color: var(--signal-yellow); }
+.check.filled span { background: var(--gap-bg); box-shadow: 0 0 0 0.15em var(--gap-bg); }
+
+@media (max-width: 480px) {
+  .import-link { flex-direction: column; }
+}
+/* The general input rule sets width: 100%; keep hidden file inputs truly out of the layout. */
+.file-button { position: relative; }
+.file-button input[type='file'] { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; overflow: hidden; }

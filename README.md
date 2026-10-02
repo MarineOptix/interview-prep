@@ -49,6 +49,18 @@ Typical interview questions the plan is built from. `_common.md` holds questions
 
 General maritime reference that grounds the AI answers. Each plan topic reads specific files (see `lib/topics.js`); `technical` resolves to `technical-deck.md`, `technical-engine.md` or `technical-catering.md` by the rank’s department. Facts about the candidate come only from the form.
 
+## Filling the form from documents
+
+The form can be filled from a CV (PDF) and from a job advert (PDF, link or pasted text); typing by hand always works too.
+
+1. A PDF is read **in the browser** with PDF.js (`public/vendor/pdfjs`, loaded only when a file is chosen). The file itself is never uploaded. Scanned PDFs have no text and are refused with a message.
+2. Obvious identifiers are removed in the browser: emails, phone numbers, document numbers, date of birth.
+3. The text goes to `POST /api/extract`, which asks the model to map it onto the form fields (`lib/extract.js`). The model is told to copy nothing personal and no vessel names. Its output is whitelisted and length-limited before it reaches the page.
+4. A link is fetched by the server (`fetchPageText`): only public http(s) hosts, every redirect re-checked, 8 s and 1 MB limits. Pages behind a login cannot be read; the visitor is asked to paste the text.
+5. Filled fields are marked yellow for the visitor to check before building the plan.
+
+Nothing is stored on the server. The site tells visitors this and asks them to remove personal details first if they worry about a leak. To make "not stored" hold for the AI provider too, turn on **Zero Data Retention** in the Groq console (Settings → Data Controls).
+
 ## How a plan is generated
 
 1. The browser posts the form to `/api/validate`. The name field is never sent; it stays in the browser and appears only on the plan and PDF.
@@ -82,6 +94,8 @@ The free plan has no custom events, so funnel steps are counted as page views of
 | --- | --- |
 | `/` and `/positions/...` | landing and rank pages |
 | `/plan` | opened the plan form |
+| `/t/cv-imported` | filled the form from a CV |
+| `/t/vacancy-imported` | filled the form from a job advert |
 | `/t/plan-started` | submitted the form |
 | `/t/plan-ready` | all 7 topics were written |
 | `/t/pdf-saved` | pressed "Save as PDF" |
@@ -104,6 +118,7 @@ lib/prompt.js             LLM prompt
 lib/llm.js                Groq call, retries, output checks, mock mode
 lib/knowledge.js          knowledge-base loader
 lib/question-bank.js      question-bank loader
+lib/extract.js            reads CVs and job adverts into form fields
 public/                   styles.css, plan.js, favicon
 content/                  positions and knowledge base
 test/                     unit tests (node --test)

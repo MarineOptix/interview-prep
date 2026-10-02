@@ -152,7 +152,67 @@ test('prompt includes the question bank for the rank and topic', () => {
 
 test('funnel pages: allowed steps render, analytics script only on Vercel', async () => {
   const { trackPage, TRACK_STEPS } = await import('../lib/pages.js');
-  assert.deepEqual(TRACK_STEPS, ['plan-started', 'plan-ready', 'pdf-saved']);
+  assert.deepEqual(TRACK_STEPS, ['cv-imported', 'vacancy-imported', 'plan-started', 'plan-ready', 'pdf-saved']);
   assert.match(trackPage('plan-ready'), /<title>plan-ready<\/title>/);
   assert.equal(trackPage('plan-ready').includes('_vercel/insights'), Boolean(process.env.VERCEL));
+});
+
+test('extraction: ranks are matched, lists whitelisted, sea service turned into lines', async () => {
+  const { cleanExtracted, matchRank } = await import('../lib/extract.js');
+  assert.equal(matchRank('4th Engineer', positions).slug, 'fourth-engineer');
+  assert.equal(matchRank('Chief Mate', positions).slug, 'chief-officer');
+  assert.equal(matchRank('AB', positions).slug, 'able-seaman');
+  assert.equal(matchRank('Able Seaman (AB)', positions).slug, 'able-seaman');
+  assert.equal(matchRank('Fitter', positions), undefined);
+
+  const cv = cleanExtracted('cv', {
+    applied_rank: 'Third Engineer', current_rank: '4/E', years_at_sea: '3.5', years_in_current_rank: 99,
+    vessel_types: ['Bulk carrier', '<script>'], certificates: ['High Voltage', 'Fake'], english_level: 'Native',
+    sea_service: [{ rank: '4/E', vessel_type: 'Bulk carrier', size: '57,000 DWT', engine: 'MAN B&W 6S50MC, 8,200 kW', period: '6 months' }, { rank: '' }],
+    duties: 'Purifiers.', name: 'Ivan Petrov',
+  }, positions);
+  assert.equal(cv.targetPosition, 'third-engineer');
+  assert.equal(cv.currentRank, 'Fourth Engineer');
+  assert.equal(cv.yearsAtSea, '3.5');
+  assert.equal(cv.yearsInRank, '');
+  assert.deepEqual(cv.vesselTypes, ['Bulk carrier']);
+  assert.deepEqual(cv.certificates, ['High Voltage']);
+  assert.equal(cv.englishLevel, '');
+  assert.equal(cv.seaService, '4/E | Bulk carrier, 57,000 DWT | MAN B&W 6S50MC, 8,200 kW | 6 months');
+  assert.equal(JSON.stringify(cv).includes('Ivan'), false);
+
+  const vac = cleanExtracted('vacancy', { rank: 'Fourth Engineer', vessel_type: 'Heavy lift vessel', vessel_size: '20,000 DWT', requirements: 'US visa' }, positions);
+  assert.equal(vac.targetPosition, 'fourth-engineer');
+  assert.equal(vac.vesselType, '');
+  assert.match(vac.requirements, /Vessel type: Heavy lift vessel\nUS visa/);
+  assert.deepEqual(cleanExtracted('cv', null, positions).vesselTypes, []);
+});
+
+test('link reading refuses private addresses and turns HTML into text', async () => {
+  const { assertPublicUrl, htmlToText, fetchPageText } = await import('../lib/extract.js');
+  const pub = async () => [{ address: '93.184.216.34' }];
+  const priv = async () => [{ address: '10.0.0.5' }];
+  await assert.rejects(assertPublicUrl('file:///etc/passwd', pub));
+  await assert.rejects(assertPublicUrl('http://127.0.0.1/admin', pub));
+  await assert.rejects(assertPublicUrl('http://169.254.169.254/latest', pub));
+  await assert.rejects(assertPublicUrl('http://[::1]/', pub));
+  await assert.rejects(assertPublicUrl('https://internal.example/', priv));
+  await assert.rejects(assertPublicUrl('https://example.com:8080/', pub));
+  assert.equal((await assertPublicUrl('https://example.com/job', pub)).hostname, 'example.com');
+  assert.equal(htmlToText('<head><title>x</title></head><p>Chief &amp; Co</p><script>bad()</script><li>4/E</li>'), 'Chief & Co\n4/E');
+
+  // A redirect to a private address is refused at the second hop.
+  const hops = [];
+  const fetchImpl = async (u) => { hops.push(String(u)); return new Response('', { status: 302, headers: { location: 'http://192.168.1.1/' } }); };
+  const resolve = async (host) => [{ address: host === 'example.com' ? '93.184.216.34' : '192.168.1.1' }];
+  await assert.rejects(fetchPageText('https://example.com/a', { fetchImpl, resolve }));
+  assert.equal(hops.length, 1);
+});
+
+test('prompt carries the sea service record and no flag', () => {
+  const input = { ...validInput, resume: { ...validInput.resume, seaService: '4/E | Bulk carrier, 57,000 DWT | MAN B&W 6S50MC | 6 months' }, vacancy: { ...validInput.vacancy, flag: 'Panama' } };
+  const { profile } = cleanProfile(input, positions);
+  const user = buildMessages(getTopic('experience'), profile)[1].content;
+  assert.match(user, /Sea service record[\s\S]*57,000 DWT/);
+  assert.equal(user.includes('Panama'), false);
 });

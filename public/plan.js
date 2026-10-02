@@ -17,12 +17,12 @@
 
   // ---------- funnel counters ----------
   // Each step is counted once per plan by loading a tiny page in a hidden frame (see TRACK_STEPS on the server).
+  const pageSent = {}; // steps counted before a plan exists (document imports)
   function track(step) {
-    if (!state) return;
-    state.sent = state.sent || {};
-    if (state.sent[step]) return;
-    state.sent[step] = true;
-    save();
+    const bag = state ? (state.sent = state.sent || {}) : pageSent;
+    if (bag[step]) return;
+    bag[step] = true;
+    if (state) save();
     const frame = document.createElement('iframe');
     frame.hidden = true;
     frame.setAttribute('aria-hidden', 'true');
@@ -68,8 +68,8 @@
     const fd = new FormData(form);
     const resume = {};
     const vacancy = {};
-    const resumeKeys = ['targetPosition', 'otherVesselTypes', 'yearsAtSea', 'yearsInRank', 'otherCertificates', 'englishLevel', 'marlinsScore', 'duties'];
-    const vacancyKeys = ['vesselType', 'vesselSize', 'mainEngine', 'tradingArea', 'flag', 'contractLength', 'company', 'requirements'];
+    const resumeKeys = ['targetPosition', 'otherVesselTypes', 'yearsAtSea', 'yearsInRank', 'otherCertificates', 'englishLevel', 'marlinsScore', 'seaService', 'duties'];
+    const vacancyKeys = ['vesselType', 'vesselSize', 'mainEngine', 'tradingArea', 'contractLength', 'company', 'requirements'];
     resumeKeys.forEach((k) => (resume[k] = fd.get(k) ?? ''));
     resume.currentRank = readRank();
     resume.vesselTypes = fd.getAll('vesselTypes');
@@ -94,6 +94,172 @@
     fillRank(input.resume.currentRank || '');
     syncDeptFields();
   }
+
+  // ---------- filling the form from a CV or a job advert ----------
+  const MAX_FILE_BYTES = 15 * 1024 * 1024;
+  const MAX_PAGES = 20;
+  const MAX_TEXT = 24000;
+
+  let pdfjsPromise = null;
+  function loadPdfjs() {
+    // The PDF reader is large, so it is fetched only when someone picks a file.
+    pdfjsPromise = pdfjsPromise || import('/vendor/pdfjs/pdf.min.mjs').then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+      return lib;
+    });
+    return pdfjsPromise;
+  }
+
+  /** Reads the text of a PDF in the browser. The file itself is never uploaded. */
+  async function pdfText(file) {
+    const lib = await loadPdfjs();
+    const doc = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = [];
+    for (let n = 1; n <= Math.min(doc.numPages, MAX_PAGES); n++) {
+      const content = await (await doc.getPage(n)).getTextContent();
+      let line = '';
+      let lastY = null;
+      const lines = [];
+      for (const item of content.items) {
+        if (typeof item.str !== 'string') continue;
+        const y = item.transform ? item.transform[5] : lastY;
+        if (lastY !== null && Math.abs(y - lastY) > 2 && line.trim()) {
+          lines.push(line.trim());
+          line = '';
+        }
+        line += item.str + (item.hasEOL ? '' : ' ');
+        if (item.hasEOL) {
+          if (line.trim()) lines.push(line.trim());
+          line = '';
+        }
+        lastY = y;
+      }
+      if (line.trim()) lines.push(line.trim());
+      pages.push(lines.join('\n'));
+    }
+    return pages.join('\n\n');
+  }
+
+  /** Removes the identifiers that are easy to spot before the text leaves the browser. */
+  function redact(text) {
+    return text
+      .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[email removed]')
+      .replace(/\+\d[\d\s().-]{7,}\d/g, '[phone removed]')
+      // Document numbers such as AB1234567 (passport, seaman's book, certificates, IMO numbers).
+      .replace(/\b[A-Z]{1,3}[\s-]?\d{6,9}\b/g, '[number removed]')
+      .replace(/(date of birth|d\.o\.b\.?|born)([^\n\d]{0,15})\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/gi, '$1$2[date removed]');
+  }
+
+  function markFilled(el) {
+    el.classList.add('filled');
+    el.addEventListener('input', () => el.classList.remove('filled'), { once: true });
+    el.addEventListener('change', () => el.classList.remove('filled'), { once: true });
+  }
+
+  /** Puts extracted values into the form without wiping what the person already typed. Returns how many fields changed. */
+  function applyFields(fields) {
+    let count = 0;
+    for (const [key, value] of Object.entries(fields)) {
+      if (Array.isArray(value)) {
+        form.querySelectorAll(`input[type=checkbox][name="${key}"]`).forEach((cb) => {
+          if (value.includes(cb.value) && !cb.checked) {
+            cb.checked = true;
+            markFilled(cb.closest('.check'));
+            count++;
+          }
+        });
+        continue;
+      }
+      if (!value) continue;
+      if (key === 'currentRank') {
+        fillRank(value);
+        markFilled(rankSelect);
+        if (rankSelect.value === 'other') markFilled(rankOther);
+        count++;
+        continue;
+      }
+      const el = form.elements[key];
+      if (!el) continue;
+      // The rank chosen on the landing page wins over what a document says.
+      if (key === 'targetPosition' && el.value) continue;
+      el.value = value;
+      if (el.value !== String(value)) continue; // a select without that option
+      markFilled(el);
+      count++;
+    }
+    syncDeptFields();
+    return count;
+  }
+
+  const importing = { cv: false, vacancy: false };
+  async function importDocument(kind, getPayload) {
+    if (importing[kind]) return;
+    const status = document.getElementById(kind === 'cv' ? 'cvStatus' : 'vacancyStatus');
+    const say = (text, isError = false) => {
+      status.textContent = text;
+      status.classList.toggle('is-error', isError);
+    };
+    importing[kind] = true;
+    try {
+      say('Reading…');
+      const payload = await getPayload();
+      if (!payload) return;
+      say('Filling in the form…');
+      const res = await post('/api/extract', { kind, ...payload }).catch(() => ({ ok: false, data: { error: 'No connection. Check your internet and try again.' } }));
+      if (!res.ok) return say(res.data.error || 'This could not be read. Fill in the form by hand.', true);
+      const count = applyFields(res.data.fields || {});
+      if (!count) return say('Nothing useful was found. Fill in the form by hand.', true);
+      track(kind === 'cv' ? 'cv-imported' : 'vacancy-imported');
+      say(`Filled in ${count} ${count === 1 ? 'field' : 'fields'}, marked in yellow. Check them and add what is missing.`);
+    } catch (err) {
+      say('This file could not be read. Fill in the form by hand.', true);
+    } finally {
+      importing[kind] = false;
+      if (status.textContent === 'Reading…' || status.textContent === 'Filling in the form…') say('');
+    }
+  }
+
+  function pdfPayload(kind, input) {
+    return async () => {
+      const file = input.files[0];
+      input.value = ''; // allow choosing the same file again
+      const status = document.getElementById(kind === 'cv' ? 'cvStatus' : 'vacancyStatus');
+      const fail = (text) => {
+        status.textContent = text;
+        status.classList.add('is-error');
+        return null;
+      };
+      if (!file) return null;
+      if (file.size > MAX_FILE_BYTES) return fail('This file is larger than 15 MB. Use a smaller PDF or fill in the form by hand.');
+      const text = redact(await pdfText(file));
+      if (text.replace(/\s/g, '').length < 150) {
+        return fail('This PDF has no text inside (it looks like a scan or photo). Fill in the form by hand, or upload a PDF saved from Word.');
+      }
+      return { text: text.slice(0, MAX_TEXT) };
+    };
+  }
+
+  const cvFile = document.getElementById('cvFile');
+  cvFile.addEventListener('change', () => importDocument('cv', pdfPayload('cv', cvFile)));
+  const vacancyFile = document.getElementById('vacancyFile');
+  vacancyFile.addEventListener('change', () => importDocument('vacancy', pdfPayload('vacancy', vacancyFile)));
+
+  const vacancyUrl = document.getElementById('vacancyUrl');
+  function readLink() {
+    const url = vacancyUrl.value.trim();
+    if (url) importDocument('vacancy', async () => ({ url }));
+  }
+  document.getElementById('vacancyUrlButton').addEventListener('click', readLink);
+  vacancyUrl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); // Enter here reads the link, it must not submit the whole form
+      readLink();
+    }
+  });
+  document.getElementById('vacancyTextButton').addEventListener('click', () => {
+    const text = document.getElementById('vacancyText').value.trim();
+    if (text) importDocument('vacancy', async () => ({ text: redact(text).slice(0, MAX_TEXT) }));
+  });
 
   function showErrors(errors) {
     errorsBox.replaceChildren();
