@@ -15,6 +15,23 @@
     try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; }
   }
 
+  // ---------- funnel counters ----------
+  // Each step is counted once per plan by loading a tiny page in a hidden frame (see TRACK_STEPS on the server).
+  function track(step) {
+    if (!state) return;
+    state.sent = state.sent || {};
+    if (state.sent[step]) return;
+    state.sent[step] = true;
+    save();
+    const frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.src = `/t/${step}`;
+    document.body.append(frame);
+    setTimeout(() => frame.remove(), 15000);
+  }
+
   // ---------- form ----------
   const positionSelect = form.elements.targetPosition;
   function syncDeptFields() {
@@ -89,6 +106,7 @@
     const vesselType = input.vacancy.vesselType;
     state = { name, input, title: `${position}, ${vesselType.toLowerCase()}`, results: {} };
     save();
+    track('plan-started');
     showResult();
     generateMissing();
   });
@@ -157,7 +175,7 @@
       el('p', { class: 'lead' }, state.title),
       el('p', { class: 'hint' }, 'Words in highlighted [brackets] are gaps for your own details. Fill them in before the interview.'),
       el('div', { class: 'actions no-print' }, [
-        el('button', { class: 'button', type: 'button', onclick: () => window.print(), ...(pending ? { disabled: '' } : {}) }, 'Save as PDF'),
+        el('button', { class: 'button', type: 'button', onclick: () => { track('pdf-saved'); window.print(); }, ...(pending ? { disabled: '' } : {}) }, 'Save as PDF'),
         el('button', { class: 'button secondary', type: 'button', onclick: editForm }, 'Change my details'),
         el('button', { class: 'button secondary', type: 'button', onclick: startOver }, 'Start a new plan'),
       ]),
@@ -204,6 +222,7 @@
       if (!result.hidden) showResult();
     }
     if (runningFor === plan) runningFor = null;
+    if (plan === state && topics.every((t) => plan.results[t.id]?.questions)) track('plan-ready');
   }
 
   function retry(topicId) {

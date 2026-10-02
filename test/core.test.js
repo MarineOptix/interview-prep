@@ -149,3 +149,10 @@ test('prompt includes the question bank for the rank and topic', () => {
   assert.match(system.content, /QUESTION BANK/);
   assert.match(user.content, /QUESTION BANK[\s\S]*crankcase explosion/);
 });
+
+test('funnel pages: allowed steps render, analytics script only on Vercel', async () => {
+  const { trackPage, TRACK_STEPS } = await import('../lib/pages.js');
+  assert.deepEqual(TRACK_STEPS, ['plan-started', 'plan-ready', 'pdf-saved']);
+  assert.match(trackPage('plan-ready'), /<title>plan-ready<\/title>/);
+  assert.equal(trackPage('plan-ready').includes('_vercel/insights'), Boolean(process.env.VERCEL));
+});

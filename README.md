@@ -72,6 +72,20 @@ Limits: `PLANS_PER_HOUR` per IP (in memory, resets on restart).
 
 Limits to know: each function call may run up to 60 s (`maxDuration`), enough for one topic. The per-IP limit lives in memory of a function instance, so on Vercel it is approximate.
 
+### Visitor counters
+
+Vercel Web Analytics (free plan: page views only, no cookies). Turn it on once: Vercel → project → **Analytics → Enable**, then redeploy. Every page includes the analytics script when running on Vercel.
+
+The free plan has no custom events, so funnel steps are counted as page views of tiny pages loaded in a hidden frame, once per plan:
+
+| Path in the Pages panel | Meaning |
+| --- | --- |
+| `/` and `/positions/...` | landing and rank pages |
+| `/plan` | opened the plan form |
+| `/t/plan-started` | submitted the form |
+| `/t/plan-ready` | all 7 topics were written |
+| `/t/pdf-saved` | pressed "Save as PDF" |
+
 ### Render or any Node host
 
 `render.yaml` is a ready Render Blueprint (Render may ask for a payment card even on the free plan). Any other host: Node 22, start command `npm start`, health check `GET /health`, same environment variables, requests of at least 90 s allowed.
