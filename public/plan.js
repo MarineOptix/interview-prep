@@ -43,13 +43,35 @@
   positionSelect.addEventListener('change', syncDeptFields);
   syncDeptFields();
 
+  // "Current or last rank": a list of ranks, with a text field only for "Other rank".
+  const rankSelect = form.elements.currentRankChoice;
+  const rankOther = form.elements.currentRankOther;
+  const rankOtherWrap = document.getElementById('currentRankOtherWrap');
+  function syncRankOther() {
+    rankOtherWrap.hidden = rankSelect.value !== 'other';
+  }
+  rankSelect.addEventListener('change', () => {
+    syncRankOther();
+    if (rankSelect.value === 'other') rankOther.focus();
+  });
+  function readRank() {
+    return rankSelect.value === 'other' ? rankOther.value.trim() : rankSelect.value;
+  }
+  function fillRank(value) {
+    const known = [...rankSelect.options].some((o) => o.value === value && value !== 'other');
+    rankSelect.value = known ? value : value ? 'other' : '';
+    rankOther.value = known ? '' : value || '';
+    syncRankOther();
+  }
+
   function readForm() {
     const fd = new FormData(form);
     const resume = {};
     const vacancy = {};
-    const resumeKeys = ['targetPosition', 'currentRank', 'otherVesselTypes', 'yearsAtSea', 'yearsInRank', 'otherCertificates', 'englishLevel', 'marlinsScore', 'duties'];
+    const resumeKeys = ['targetPosition', 'otherVesselTypes', 'yearsAtSea', 'yearsInRank', 'otherCertificates', 'englishLevel', 'marlinsScore', 'duties'];
     const vacancyKeys = ['vesselType', 'vesselSize', 'mainEngine', 'tradingArea', 'flag', 'contractLength', 'company', 'requirements'];
     resumeKeys.forEach((k) => (resume[k] = fd.get(k) ?? ''));
+    resume.currentRank = readRank();
     resume.vesselTypes = fd.getAll('vesselTypes');
     resume.certificates = fd.getAll('certificates');
     vacancyKeys.forEach((k) => (vacancy[k] = fd.get(k) ?? ''));
@@ -69,6 +91,7 @@
       cb.checked = list.includes(cb.value);
     });
     set('name', name || '');
+    fillRank(input.resume.currentRank || '');
     syncDeptFields();
   }
 

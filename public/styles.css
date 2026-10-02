@@ -263,3 +263,8 @@ mark.gap { background: var(--gap-bg); color: inherit; padding: 0 0.15em; border-
   a { color: inherit; }
   @page { margin: 16mm 14mm; }
 }
+
+/* ---------- follow-up field shown under a select ("Other rank") ---------- */
+.sub-field { margin-top: 0.75rem; }
+.sub-field[hidden] { display: none; }
+.sub-field label { display: block; font-weight: 500; font-size: var(--step--1); margin-bottom: 0.35rem; }
