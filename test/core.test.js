@@ -216,3 +216,14 @@ test('prompt carries the sea service record and no flag', () => {
   assert.match(user, /Sea service record[\s\S]*57,000 DWT/);
   assert.equal(user.includes('Panama'), false);
 });
+
+test('contacts: valid values become links, malformed ones are ignored', async () => {
+  const { contactLinks } = await import('../lib/pages.js');
+  assert.deepEqual(contactLinks({}), []);
+  assert.deepEqual(contactLinks({ CONTACT_TELEGRAM: '@sea_prep', CONTACT_EMAIL: ' hello@example.com ' }), [
+    { label: 'Telegram @sea_prep', href: 'https://t.me/sea_prep' },
+    { label: 'hello@example.com', href: 'mailto:hello@example.com' },
+  ]);
+  assert.equal(contactLinks({ CONTACT_TELEGRAM: 'https://t.me/sea_prep' })[0].href, 'https://t.me/sea_prep');
+  assert.deepEqual(contactLinks({ CONTACT_TELEGRAM: 'x"><script>', CONTACT_EMAIL: 'not an email' }), []);
+});

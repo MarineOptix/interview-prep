@@ -79,7 +79,7 @@ Limits: `PLANS_PER_HOUR` per IP (in memory, resets on restart).
 
 1. vercel.com → **Add New → Project** → import `MarineOptix/interview-prep`.
 2. Framework preset: **Other**. Leave build and output settings as they are (they come from `vercel.json`).
-3. Environment variables: `GROQ_API_KEY` (required), optionally `GROQ_MODEL`, `PLANS_PER_HOUR`.
+3. Environment variables: `GROQ_API_KEY` (required), optionally `GROQ_MODEL`, `PLANS_PER_HOUR`, and `CONTACT_TELEGRAM` / `CONTACT_EMAIL` to show the owner's contacts in the footer of every page.
 4. **Deploy**. Every push to `main` deploys again.
 
 Limits to know: each function call may run up to 60 s (`maxDuration`), enough for one topic. The per-IP limit lives in memory of a function instance, so on Vercel it is approximate.
