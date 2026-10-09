@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { closeDb } from '../lib/db.js';
 import { runChecks, outputText, findAudio, wavTone, tokenMatches } from '../lib/provider-check.js';
 
 const GEMINI_KEY = 'secret-gemini-key';
@@ -19,6 +23,7 @@ function fakeProviders({ tts = 'ok', leakKey = false } = {}) {
       if (tts === 'fail') return new Response(`{"error":{"message":"voice not found${leakKey ? ` for key ${GEMINI_KEY}` : ''}"}}`, { status: 400 });
       return interaction([{ type: 'audio', mime_type: 'audio/wav', data: SPOKEN }]);
     }
+    if (Array.isArray(body.input) && body.input.some((item) => item.type === 'model_output')) return interaction([{ type: 'text', text: '{"answer":"Your last vessel was Aurora."}' }]);
     const hasAudio = Array.isArray(body.input) && body.input.some((item) => item.type === 'audio');
     if (hasAudio) return interaction([{ type: 'text', text: '{"transcript":"Good morning. Please tell me about your last vessel."}' }]);
     return interaction([{ type: 'text', text: '{"status":"ok"}' }]);
@@ -38,13 +43,13 @@ test('provider check: reads text and audio out of an interaction', () => {
   assert.equal(findAudio({ steps: [] }), null);
 });
 
-test('provider check: all four calls pass and nothing is stored at Google', async () => {
+test('provider check: all five calls pass and nothing is stored at Google', async () => {
   const { calls, fetchImpl } = fakeProviders();
   const report = await runChecks(env, fetchImpl);
   assert.equal(report.ok, true);
-  assert.deepEqual(report.results.map((r) => [r.id, r.ok]), [['gemini-text', true], ['gemini-tts', true], ['gemini-audio', true], ['groq-text', true]]);
+  assert.deepEqual(report.results.map((r) => [r.id, r.ok]), [['gemini-text', true], ['gemini-tts', true], ['gemini-audio', true], ['gemini-dialogue', true], ['groq-text', true]]);
   const gemini = calls.filter((c) => c.url.includes('/v1beta/interactions'));
-  assert.equal(gemini.length, 3);
+  assert.equal(gemini.length, 4);
   for (const call of gemini) {
     assert.equal(call.body.store, false);
     assert.equal(call.headers['x-goog-api-key'], GEMINI_KEY);
@@ -53,6 +58,12 @@ test('provider check: all four calls pass and nothing is stored at Google', asyn
   const heard = gemini[2].body.input.find((item) => item.type === 'audio');
   assert.equal(heard.data, SPOKEN);
   assert.equal(byId(report, 'gemini-audio').detail.includes('vessel'), true);
+  // The conversation check goes through the model layer: system instruction, earlier turns as steps, a schema.
+  const dialogue = gemini[3].body;
+  assert.equal(typeof dialogue.system_instruction, 'string');
+  assert.deepEqual(dialogue.input.map((step) => step.type), ['user_input', 'model_output', 'user_input']);
+  assert.equal(dialogue.response_format.schema.required[0], 'answer');
+  assert.match(byId(report, 'gemini-dialogue').detail, /Aurora/);
   assert.equal(JSON.stringify(report).includes(GEMINI_KEY), false);
   assert.equal(JSON.stringify(report).includes(GROQ_KEY), false);
 });
@@ -78,7 +89,7 @@ test('provider check: without keys nothing is called and every check is skipped'
   const report = await runChecks({}, fetchImpl);
   assert.equal(calls.length, 0);
   assert.equal(report.ok, false);
-  assert.equal(report.results.length, 4);
+  assert.equal(report.results.length, 5);
   assert.equal(report.results.every((r) => r.skipped && !r.ok), true);
 });
 
@@ -127,6 +138,8 @@ test('check page: hidden unless the token is configured and matches; runs once p
   delete process.env.GEMINI_API_KEY;
   delete process.env.GROQ_API_KEY;
   delete process.env.CHECK_TOKEN;
+  const dataDir = mkdtempSync(join(tmpdir(), 'passmuster-check-'));
+  process.env.DATA_DIR = dataDir;
   try {
     assert.equal((await request('/check-providers?token=anything')).status, 404);
     process.env.CHECK_TOKEN = 'b'.repeat(24);
@@ -136,10 +149,16 @@ test('check page: hidden unless the token is configured and matches; runs once p
     assert.equal(ok.status, 200);
     assert.equal(ok.headers['Cache-Control'], 'no-store');
     const report = JSON.parse(ok.body);
-    assert.equal(report.results.length, 4);
+    assert.equal(report.results.length, 5);
     assert.equal(report.results.every((r) => r.skipped), true);
+    // The page also says whether the database of access codes opens, without showing any code.
+    assert.equal(report.storage.ok, true);
+    assert.deepEqual([report.storage.codes, report.storage.sessions, report.storage.backups], [0, 0, 0]);
+    assert.match(report.storage.createdAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal((await request(`/check-providers?token=${'b'.repeat(24)}`)).status, 429);
   } finally {
+    closeDb();
+    rmSync(dataDir, { recursive: true, force: true });
     for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
     Object.assign(process.env, saved);
   }

@@ -10,7 +10,7 @@ Requires Node.js 22 or newer.
 
 ```bash
 npm install
-cp .env.example .env      # add GROQ_API_KEY, or set MOCK_LLM=1 to work on the UI without the API
+cp .env.example .env      # add GROQ_API_KEY, or set MOCK_LLM=1 to work on the UI without the API; DATA_DIR=./data keeps the database in the project folder
 npm run dev               # http://localhost:3000
 npm test
 ```
@@ -71,6 +71,38 @@ Nothing is stored on the server. The site tells visitors this and asks them to r
 
 Limits: `PLANS_PER_HOUR` per IP (in memory, resets on restart).
 
+## Voice rehearsal (PassMuster): the foundation
+
+The voice rehearsal is being built in stages on top of this site. What is in place so far has no page of its own yet.
+
+### Model and speech layers — `lib/ai/`
+
+The product calls two functions and does not know which provider answers.
+
+- `askJson(request)` in `lib/ai/llm.js` sends messages (and a recorded answer, if there is one) and returns checked JSON. `request.use` says what the call is for: `text` is the written plan and CV reading (Groq by default, Gemini with `TEXT_PROVIDER=gemini`); `turn`, `plan` and `report` are the three calls of a rehearsal (Gemini). It retries once on network errors, server errors and unusable answers, never on a rejected request, and writes nothing from the messages or answers to the log: a provider's error is logged as its code and message only, with keys removed.
+- `synthesize(text)` in `lib/ai/speech.js` returns audio, or `null` when the browser should read the line itself: `SPEECH_PROVIDER=browser`, no Gemini key, the provider over its limit, or a failed call. The voice never stops a rehearsal.
+
+Models, the Gemini address and keys come from the environment (see `.env.example`).
+
+### Database — `lib/db.js`
+
+One SQLite file, `passmuster.db`, in `DATA_DIR`, through the SQLite module built into Node 22 (it prints an "experimental" warning at start). Three tables: `access` (codes and their counters), `sessions` (code, rank, start and end time, number of answers, status), `payments` (empty until online payment is connected). No conversation, recording or report is stored. Once a day the file is copied to `DATA_DIR/backup`; the newest seven copies are kept.
+
+### Access codes — `lib/access.js`, `scripts/codes.js`
+
+A rehearsal is opened by a code, without accounts. A code has a number of rehearsals and, optionally, an end date. One rehearsal is taken off the code when the third answer arrives, so a failed microphone check costs nothing. To keep that from becoming an endless supply of free two-answer rehearsals, a code gets at most five such free starts in 24 hours.
+
+```bash
+npm run codes -- create --count 10 --rehearsals 3 --days 30 --note "first testers"
+npm run codes -- list
+```
+
+The command works on the database in `DATA_DIR`, so it must run where that file is.
+
+### Payments — `lib/payments/`
+
+Designed now, connected later. A payment provider is a module with two operations: `createPayment` (returns the address of the payment page) and `handleNotification` (checks the provider's signature, then calls `applyPayment`, which adds rehearsals to a code; a repeated notification changes nothing). The only provider today is `manual`: no online payment, codes are issued with the command above.
+
 ## Deploy
 
 ### Vercel (current)
@@ -105,17 +137,23 @@ The free plan has no custom events, so funnel steps are counted as page views of
 `amvera.yml` tells Amvera to run Node 22 with `npm start` on port 3000 and to mount persistent storage at `/data`. Amvera runs `npm install` itself during the build phase.
 
 1. amvera.ru → new project → connect this repository (or push to the Amvera git remote).
-2. Add the environment variables in the project settings: `GROQ_API_KEY`, and for the provider check below `GEMINI_API_KEY` and `CHECK_TOKEN`.
+2. Add the environment variables in the project settings: `GROQ_API_KEY`, `GEMINI_API_KEY`, and for the server check below `CHECK_TOKEN`. `DATA_DIR` can stay unset: it defaults to `/data`, the folder Amvera keeps across restarts and rebuilds.
 3. Deploy, then open `/health`: it answers `{"ok":true}`.
 
-### Provider check (stage 0 of the voice rehearsal)
+### Server check
 
-Answers one question: can this server reach the AI providers the voice rehearsal needs? It makes four small calls: Gemini text with JSON output, Gemini speech synthesis, Gemini audio input (it listens to the speech it has just synthesised), and Groq text. Every Gemini request is sent with `store: false`, so Google does not keep it.
+Answers two questions: can this server reach the AI providers the voice rehearsal needs, and does its database open?
 
-- On a deployed server: set `CHECK_TOKEN` to a random string of 16 or more characters and open `/check-providers?token=<that string>`. The page answers with JSON: one entry per call with `ok`, the time in milliseconds, the HTTP status and a short detail. Without the right token the page answers 404, and it runs at most once in 30 seconds. Remove `CHECK_TOKEN` when the check is done.
-- On your own computer: `npm run check:providers` prints the same result as text.
+It makes five small calls: Gemini text with JSON output, Gemini speech synthesis, Gemini audio input (it listens to the speech it has just synthesised), a short Gemini conversation sent the way a rehearsal turn will be (system instruction, earlier turns, a schema), and Groq text. Every Gemini request is sent with `store: false`, so Google does not keep it.
 
-API keys never appear in the result. The three Gemini calls decide whether the check passes; the Groq call only shows whether the text plan can keep using Groq from this server.
+- On a deployed server: set `CHECK_TOKEN` to a random string of 16 or more characters and open `/check-providers?token=<that string>`. The page answers with JSON: one entry per call with `ok`, the time in milliseconds, the HTTP status and a short detail, and a `storage` entry with the date the database was first created, the number of codes and sessions, and the number of daily copies. Without the right token the page answers 404, and it runs at most once in 30 seconds. Remove `CHECK_TOKEN` when the check is done.
+- On your own computer: `npm run check:providers` prints the provider part as text.
+
+API keys and access codes never appear in the result. The Gemini calls decide whether the check passes; the Groq call only shows whether the text plan can keep using Groq from this server.
+
+### Moving to another server
+
+Nothing in the code is specific to Amvera. To move: copy the file `passmuster.db` from the old `DATA_DIR` to the new one, set the same environment variables, and start with `npm start`. On a server in a country where the Gemini API is offered, leave `GEMINI_BASE_URL` empty.
 
 ### Render or any Node host
 
@@ -132,12 +170,17 @@ lib/pages.js              HTML for all pages
 lib/form.js               form options and server-side validation
 lib/topics.js             plan topics, question counts, knowledge files
 lib/prompt.js             LLM prompt
-lib/llm.js                Groq call, retries, output checks, mock mode
+lib/llm.js                written plan: one model call per topic, output checks, mock mode
+lib/ai/                   model layer (llm.js, groq.js, gemini.js) and speech layer (speech.js, gemini-tts.js)
+lib/db.js                 SQLite database of access codes and counters
+lib/backup.js             daily copy of the database
+lib/access.js             access codes, rehearsal sessions, charging
+lib/payments/             payment provider interface and the manual provider
 lib/knowledge.js          knowledge-base loader
 lib/question-bank.js      question-bank loader
 lib/extract.js            reads CVs and job adverts into form fields
-lib/provider-check.js     stage 0: checks Gemini and Groq from this server
-scripts/                  check-providers.js (command-line provider check)
+lib/provider-check.js     checks Gemini and Groq from this server
+scripts/                  check-providers.js (provider check), codes.js (access codes)
 amvera.yml                Amvera deployment settings
 public/                   styles.css, plan.js, favicon
 content/                  positions and knowledge base
