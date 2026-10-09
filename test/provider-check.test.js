@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closeDb } from '../lib/db.js';
-import { runChecks, outputText, findAudio, wavTone, tokenMatches } from '../lib/provider-check.js';
+import { runChecks, runLatencyProbe, outputText, findAudio, wavTone, tokenMatches } from '../lib/provider-check.js';
 
 const GEMINI_KEY = 'secret-gemini-key';
 const GROQ_KEY = 'secret-groq-key';
@@ -122,6 +122,34 @@ test('provider check: the token must be set, long enough and equal', () => {
   assert.equal(tokenMatches('', { CHECK_TOKEN: token }), false);
   assert.equal(tokenMatches(token, {}), false);
   assert.equal(tokenMatches('short', { CHECK_TOKEN: 'short' }), false);
+});
+
+test('latency probe: five timed calls, none stored, with the token counts Google reports', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    calls.push({ headers: opts.headers, body });
+    if (body.generation_config?.thinking_level) return new Response(`{"error":{"message":"thinking_level is not supported for key ${GEMINI_KEY}"}}`, { status: 400 });
+    return Response.json({ steps: [], usage: { total_input_tokens: 12, total_output_tokens: 5, total_thought_tokens: 40 } });
+  };
+  const probe = await runLatencyProbe({ GEMINI_API_KEY: GEMINI_KEY, GEMINI_PLAN_MODEL: 'gemini-plan-x' }, fetchImpl);
+
+  assert.deepEqual(probe.results.map((row) => row.id), ['turn-model-plain', 'turn-model-json', 'plan-model-default', 'plan-model-low-thinking', 'turn-model-json-again']);
+  assert.equal(calls.length, 5);
+  for (const call of calls) {
+    assert.equal(call.body.store, false);
+    assert.equal(call.headers['x-goog-api-key'], GEMINI_KEY);
+  }
+  assert.deepEqual(probe.results[0].tokens, { input: 12, output: 5, thought: 40 });
+  assert.equal(probe.results[2].model, 'gemini-plan-x');
+  const refused = probe.results[3];
+  assert.deepEqual([refused.ok, refused.status], [false, 400]);
+  assert.match(refused.detail, /thinking_level is not supported/);
+  assert.equal(probe.ok, false);
+  assert.equal(JSON.stringify(probe).includes(GEMINI_KEY), false);
+
+  const without = await runLatencyProbe({}, fetchImpl);
+  assert.deepEqual([without.ok, without.results.length, calls.length], [false, 0, 5]);
 });
 
 /** Calls the app the way the HTTP server does and collects the response. */

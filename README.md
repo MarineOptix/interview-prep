@@ -148,6 +148,7 @@ It makes five small calls: Gemini text with JSON output, Gemini speech synthesis
 
 - On a deployed server: set `CHECK_TOKEN` to a random string of 16 or more characters and open `/check-providers?token=<that string>`. The page answers with JSON: one entry per call with `ok`, the time in milliseconds, the HTTP status and a short detail, and a `storage` entry with the date the database was first created, the number of codes and sessions, and the number of daily copies. Without the right token the page answers 404, and it runs at most once in 30 seconds. Remove `CHECK_TOKEN` when the check is done.
 - On your own computer: `npm run check:providers` prints the provider part as text.
+- `/check-providers?token=<that string>&probe=latency` runs a different set: five small Gemini calls, each with its time and the token counts Google reports (thinking tokens included). It shows how fast the turn model and the plan model answer from this server.
 
 API keys and access codes never appear in the result. The Gemini calls decide whether the check passes; the Groq call only shows whether the text plan can keep using Groq from this server.
 
