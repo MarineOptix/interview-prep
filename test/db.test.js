@@ -4,7 +4,8 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, dbFile, dataDir, storageStatus, transaction } from '../lib/db.js';
-import { backupDb, listBackups } from '../lib/backup.js';
+import { backupDb, listBackups, startDailyBackup, backupDir } from '../lib/backup.js';
+import { closeDb } from '../lib/db.js';
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'passmuster-'));
@@ -76,4 +77,33 @@ test('backup: one copy a day, readable, and only the newest seven are kept', (t)
   assert.deepEqual(listBackups(backups), [3, 4, 5, 6, 7, 8, 9].map((d) => `passmuster-2026-10-0${d}.db`));
   assert.deepEqual(readdirSync(backups).sort(), ['notes.txt', ...listBackups(backups)]);
   db.close();
+});
+
+test('storage: a transaction that SQLite has already ended still reports the first error', () => {
+  const db = openDb();
+  assert.throws(() => transaction(db, () => {
+    db.exec('ROLLBACK');
+    throw new Error('disk full');
+  }), /disk full/);
+  assert.equal(transaction(db, () => 'still usable'), 'still usable');
+});
+
+test('storage: the server starts without a writable data folder, and with one it opens the database and writes the first copy', async (t) => {
+  const quiet = console.error;
+  const log = console.log;
+  console.error = () => {};
+  console.log = () => {};
+  t.after(() => { console.error = quiet; console.log = log; closeDb(); });
+
+  // The same code runs as a Vercel function, where there is no data folder: pages that need no storage must keep working.
+  const noStorage = { DATA_DIR: '/dev/null/data' };
+  assert.equal(startDailyBackup(noStorage), false);
+  const { default: handle } = await import('../api/index.js');
+  const out = { status: 0, body: '' };
+  await handle({ method: 'GET', url: '/health', headers: {}, socket: {} }, { headersSent: false, writeHead(status) { out.status = status; }, end(body) { out.body = String(body); } });
+  assert.deepEqual([out.status, out.body], [200, '{"ok":true}']);
+
+  const env = { DATA_DIR: tempDir(t) };
+  assert.equal(startDailyBackup(env), true);
+  assert.equal(listBackups(backupDir(env)).length, 1);
 });

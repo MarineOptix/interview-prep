@@ -79,7 +79,7 @@ The voice rehearsal is being built in stages on top of this site. What is in pla
 
 The product calls two functions and does not know which provider answers.
 
-- `askJson(request)` in `lib/ai/llm.js` sends messages (and a recorded answer, if there is one) and returns checked JSON. `request.use` says what the call is for: `text` is the written plan and CV reading (Groq by default, Gemini with `TEXT_PROVIDER=gemini`); `turn`, `plan` and `report` are the three calls of a rehearsal (Gemini). It retries once on network errors, server errors and unusable answers, never on a rejected request, and writes nothing from the messages or answers to the log.
+- `askJson(request)` in `lib/ai/llm.js` sends messages (and a recorded answer, if there is one) and returns checked JSON. `request.use` says what the call is for: `text` is the written plan and CV reading (Groq by default, Gemini with `TEXT_PROVIDER=gemini`); `turn`, `plan` and `report` are the three calls of a rehearsal (Gemini). It retries once on network errors, server errors and unusable answers, never on a rejected request, and writes nothing from the messages or answers to the log: a provider's error is logged as its code and message only, with keys removed.
 - `synthesize(text)` in `lib/ai/speech.js` returns audio, or `null` when the browser should read the line itself: `SPEECH_PROVIDER=browser`, no Gemini key, the provider over its limit, or a failed call. The voice never stops a rehearsal.
 
 Models, the Gemini address and keys come from the environment (see `.env.example`).
@@ -90,7 +90,7 @@ One SQLite file, `passmuster.db`, in `DATA_DIR`, through the SQLite module built
 
 ### Access codes — `lib/access.js`, `scripts/codes.js`
 
-A rehearsal is opened by a code, without accounts. A code has a number of rehearsals and, optionally, an end date. One rehearsal is taken off the code when the third answer arrives, so a failed microphone check costs nothing.
+A rehearsal is opened by a code, without accounts. A code has a number of rehearsals and, optionally, an end date. One rehearsal is taken off the code when the third answer arrives, so a failed microphone check costs nothing. To keep that from becoming an endless supply of free two-answer rehearsals, a code gets at most five such free starts in 24 hours.
 
 ```bash
 npm run codes -- create --count 10 --rehearsals 3 --days 30 --note "first testers"

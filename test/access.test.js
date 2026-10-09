@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.js';
-import { createCodes, checkCode, startSession, recordTurn, finishSession, normaliseCode, listCodes, CHARGE_AFTER_TURNS } from '../lib/access.js';
+import { createCodes, checkCode, startSession, recordTurn, finishSession, normaliseCode, listCodes, CHARGE_AFTER_TURNS, FREE_STARTS_PER_DAY } from '../lib/access.js';
 import { applyPayment, paymentProvider } from '../lib/payments/index.js';
 
 const NOW = new Date('2026-10-09T12:00:00Z');
@@ -89,6 +89,25 @@ test('access: a rehearsal that stops before the third answer costs nothing', () 
   assert.deepEqual(finishSession(db, sessionId, NOW), { ok: true });
   assert.equal(used(db, code), 0);
   assert.equal(checkCode(db, code, NOW).remaining, 1);
+});
+
+test('access: a code cannot be used for an endless row of free two-answer rehearsals', () => {
+  const db = openDb();
+  const [code] = createCodes(db, { rehearsals: 2 }, NOW);
+  const hoursLater = (n) => new Date(NOW.getTime() + n * 60 * 60 * 1000);
+  for (let i = 0; i < FREE_STARTS_PER_DAY; i++) {
+    const { sessionId } = startSession(db, code, 'second-engineer', hoursLater(i));
+    answer(db, sessionId, 2);
+    finishSession(db, sessionId, hoursLater(i));
+  }
+  assert.deepEqual(startSession(db, code, 'second-engineer', hoursLater(6)), { ok: false, reason: 'too_many_starts' });
+  assert.equal(used(db, code), 0);
+
+  // A day after the first free start the door opens again, and a rehearsal that reached the third answer never counts against it.
+  const next = startSession(db, code, 'second-engineer', hoursLater(24));
+  assert.equal(next.ok, true);
+  answer(db, next.sessionId, CHARGE_AFTER_TURNS);
+  assert.equal(startSession(db, code, 'second-engineer', hoursLater(24)).ok, true);
 });
 
 test('access: two rehearsals on a code with one left cannot both pass the third answer', () => {

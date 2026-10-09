@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { askJson, resolve, LlmError } from '../lib/ai/llm.js';
 import { synthesize, speechMode } from '../lib/ai/speech.js';
+import { summarise } from '../lib/ai/http.js';
 
 const interaction = (content) => Response.json({ steps: [{ type: 'model_output', content }] });
 const geminiText = (object) => interaction([{ type: 'text', text: JSON.stringify(object) }]);
@@ -161,6 +162,57 @@ test('model layer: what the candidate said never reaches the server log', async 
   assert.equal(logged.includes('Ivan Petrov'), false);
   assert.equal(logged.includes('Aurora'), false);
   assert.equal(logged.includes('gemini-secret'), false);
+});
+
+test('model layer: a provider error body that echoes the key, the request or a half-written answer stays out of the log', async () => {
+  const messages = [{ role: 'user', content: 'My name is Ivan Petrov.', audio: { data: 'UkVDT1JESU5H', mimeType: 'audio/webm' } }];
+  const echo = JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key gemini-secret is not valid', details: [{ input: 'My name is Ivan Petrov.', audio: 'UkVDT1JESU5H' }] } });
+  const gemini = recorder(new Response(echo, { status: 400 }));
+  const geminiLog = await quietly(async () => {
+    await assert.rejects(askJson({ use: 'turn', messages }, KEYS, gemini.fetchImpl), (err) => !err.message.includes('gemini-secret'));
+  });
+  assert.match(geminiLog, /HTTP 400: INVALID_ARGUMENT: API key \*\*\* is not valid/);
+  for (const secret of ['gemini-secret', 'Ivan Petrov', 'UkVDT1JESU5H']) assert.equal(geminiLog.includes(secret), false);
+
+  // Groq puts the model's partial answer into failed_generation when JSON mode fails.
+  const failed = JSON.stringify({ error: { message: 'Failed to generate JSON', type: 'invalid_request_error', code: 'json_validate_failed', failed_generation: '{"name":"Ivan Petrov"' } });
+  const groq = recorder(new Response(failed, { status: 400 }), groqText({ ok: 1 }));
+  const groqLog = await quietly(async () => {
+    assert.deepEqual(await askJson({ use: 'text', messages: [{ role: 'user', content: 'x' }] }, KEYS, groq.fetchImpl), { ok: 1 });
+  });
+  assert.equal(groq.calls.length, 2);
+  assert.equal('response_format' in groq.calls[1].body, false);
+  assert.equal(groqLog.includes('Ivan Petrov'), false);
+
+  // An answer that is not JSON is named, not quoted.
+  const garbled = recorder(interaction([{ type: 'text', text: '{"transcript": Ivan Petrov said' }]));
+  const garbledLog = await quietly(async () => {
+    await assert.rejects(askJson({ use: 'turn', messages: [{ role: 'user', content: 'x' }] }, KEYS, garbled.fetchImpl));
+  });
+  assert.match(garbledLog, /the answer could not be used/);
+  assert.equal(garbledLog.includes('Ivan'), false);
+
+  assert.equal(summarise('<html>Bad gateway</html>'), 'error body of 24 characters, not shown');
+});
+
+test('model layer: a dropped connection is tried once more', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    return geminiText({ ok: 1 });
+  };
+  const logged = await quietly(async () => {
+    assert.deepEqual(await askJson({ use: 'turn', messages: [{ role: 'user', content: 'x' }] }, KEYS, fetchImpl), { ok: 1 });
+  });
+  assert.equal(calls, 2);
+  assert.match(logged, /attempt 1: no connection: ECONNRESET/);
+
+  const down = async () => { throw new TypeError('fetch failed'); };
+  await quietly(async () => {
+    await assert.rejects(askJson({ use: 'turn', messages: [{ role: 'user', content: 'x' }] }, KEYS, down), (err) => err.status === 502 && err.cause?.network === true);
+    assert.equal(await synthesize('Hello.', KEYS, down), null);
+  });
 });
 
 test('speech layer: Gemini voices the line and the request is not stored', async () => {
