@@ -1,0 +1,14 @@
+# Amvera Cloud: https://docs.amvera.ru/applications/environments/nodejs-server.html
+# Dependencies are installed by Amvera during the build phase (npm install); there is no build step of our own.
+meta:
+  environment: node
+  toolchain:
+    name: npm
+    version: 22
+
+run:
+  command: npm start
+  # The app listens on PORT, 3000 by default (see .env.example).
+  containerPort: 3000
+  # Survives restarts and rebuilds; the SQLite file will live here.
+  persistenceMount: /data

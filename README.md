@@ -100,6 +100,23 @@ The free plan has no custom events, so funnel steps are counted as page views of
 | `/t/plan-ready` | all 7 topics were written |
 | `/t/pdf-saved` | pressed "Save as PDF" |
 
+### Amvera
+
+`amvera.yml` tells Amvera to run Node 22 with `npm start` on port 3000 and to mount persistent storage at `/data`. Amvera runs `npm install` itself during the build phase.
+
+1. amvera.ru → new project → connect this repository (or push to the Amvera git remote).
+2. Add the environment variables in the project settings: `GROQ_API_KEY`, and for the provider check below `GEMINI_API_KEY` and `CHECK_TOKEN`.
+3. Deploy, then open `/health`: it answers `{"ok":true}`.
+
+### Provider check (stage 0 of the voice rehearsal)
+
+Answers one question: can this server reach the AI providers the voice rehearsal needs? It makes four small calls: Gemini text with JSON output, Gemini speech synthesis, Gemini audio input (it listens to the speech it has just synthesised), and Groq text. Every Gemini request is sent with `store: false`, so Google does not keep it.
+
+- On a deployed server: set `CHECK_TOKEN` to a random string of 16 or more characters and open `/check-providers?token=<that string>`. The page answers with JSON: one entry per call with `ok`, the time in milliseconds, the HTTP status and a short detail. Without the right token the page answers 404, and it runs at most once in 30 seconds. Remove `CHECK_TOKEN` when the check is done.
+- On your own computer: `npm run check:providers` prints the same result as text.
+
+API keys never appear in the result. The three Gemini calls decide whether the check passes; the Groq call only shows whether the text plan can keep using Groq from this server.
+
 ### Render or any Node host
 
 `render.yaml` is a ready Render Blueprint (Render may ask for a payment card even on the free plan). Any other host: Node 22, start command `npm start`, health check `GET /health`, same environment variables, requests of at least 90 s allowed.
@@ -119,6 +136,9 @@ lib/llm.js                Groq call, retries, output checks, mock mode
 lib/knowledge.js          knowledge-base loader
 lib/question-bank.js      question-bank loader
 lib/extract.js            reads CVs and job adverts into form fields
+lib/provider-check.js     stage 0: checks Gemini and Groq from this server
+scripts/                  check-providers.js (command-line provider check)
+amvera.yml                Amvera deployment settings
 public/                   styles.css, plan.js, favicon
 content/                  positions and knowledge base
 test/                     unit tests (node --test)
